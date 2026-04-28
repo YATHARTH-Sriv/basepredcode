@@ -1,0 +1,42 @@
+{
+  "_format": "hh3-sol-build-info-1",
+  "id": "solc-0_8_20-a4388c701224dca267bf0357961e55608418cc02",
+  "solcVersion": "0.8.20",
+  "solcLongVersion": "0.8.20+commit.a1b79de6",
+  "compilerType": "solc",
+  "userSourceNameMap": {
+    "contracts/HoverMarkets.sol": "project/contracts/HoverMarkets.sol"
+  },
+  "input": {
+    "language": "Solidity",
+    "settings": {
+      "evmVersion": "shanghai",
+      "outputSelection": {
+        "*": {
+          "": [
+            "ast"
+          ],
+          "*": [
+            "abi",
+            "evm.bytecode.linkReferences",
+            "evm.bytecode.object",
+            "evm.bytecode.opcodes",
+            "evm.bytecode.sourceMap",
+            "evm.deployedBytecode.immutableReferences",
+            "evm.deployedBytecode.linkReferences",
+            "evm.deployedBytecode.object",
+            "evm.deployedBytecode.opcodes",
+            "evm.deployedBytecode.sourceMap",
+            "evm.methodIdentifiers"
+          ]
+        }
+      },
+      "remappings": []
+    },
+    "sources": {
+      "project/contracts/HoverMarkets.sol": {
+        "content": "// SPDX-License-Identifier: MIT\npragma solidity ^0.8.20;\n\ncontract HoverMarkets {\n    uint256 public marketCount;\n\n    enum Outcome { Pending, Yes, No }\n\n    struct Market {\n        address creator;\n        string question;\n        uint256 deadline;\n        bool resolved;\n        Outcome outcome;\n        uint256 totalYesPool;\n        uint256 totalNoPool;\n    }\n\n    mapping(uint256 => Market) public markets;\n    // marketId => (user => amount)\n    mapping(uint256 => mapping(address => uint256)) public yesBets;\n    mapping(uint256 => mapping(address => uint256)) public noBets;\n    mapping(uint256 => mapping(address => bool)) public hasClaimed;\n\n    event MarketCreated(uint256 indexed marketId, address indexed creator, string question, uint256 deadline);\n    event BetPlaced(uint256 indexed marketId, address indexed better, bool isYes, uint256 amount);\n    event MarketResolved(uint256 indexed marketId, bool finalOutcome);\n    event WinningsClaimed(uint256 indexed marketId, address indexed winner, uint256 amount);\n\n    function createMarket(string memory _question, uint256 _durationInSeconds) external returns (uint256) {\n        require(_durationInSeconds > 0, \"Duration must be > 0\");\n\n        marketCount++;\n        uint256 marketId = marketCount;\n        uint256 deadline = block.timestamp + _durationInSeconds;\n\n        markets[marketId] = Market({\n            creator: msg.sender,\n            question: _question,\n            deadline: deadline,\n            resolved: false,\n            outcome: Outcome.Pending,\n            totalYesPool: 0,\n            totalNoPool: 0\n        });\n\n        emit MarketCreated(marketId, msg.sender, _question, deadline);\n        return marketId;\n    }\n\n    function placeBet(uint256 _marketId, bool _isYes) external payable {\n        require(msg.value > 0, \"Must bet more than 0\");\n        Market storage market = markets[_marketId];\n        require(market.creator != address(0), \"Market does not exist\");\n        require(block.timestamp < market.deadline, \"Market deadline has passed\");\n        require(!market.resolved, \"Market already resolved\");\n\n        if (_isYes) {\n            market.totalYesPool += msg.value;\n            yesBets[_marketId][msg.sender] += msg.value;\n        } else {\n            market.totalNoPool += msg.value;\n            noBets[_marketId][msg.sender] += msg.value;\n        }\n\n        emit BetPlaced(_marketId, msg.sender, _isYes, msg.value);\n    }\n\n    function resolveMarket(uint256 _marketId, bool _finalOutcome) external {\n        Market storage market = markets[_marketId];\n        require(market.creator != address(0), \"Market does not exist\");\n        require(msg.sender == market.creator, \"Only creator can resolve\");\n        require(block.timestamp >= market.deadline, \"Deadline not reached yet\");\n        require(!market.resolved, \"Already resolved\");\n\n        market.resolved = true;\n        market.outcome = _finalOutcome ? Outcome.Yes : Outcome.No;\n\n        emit MarketResolved(_marketId, _finalOutcome);\n    }\n\n    function claimWinnings(uint256 _marketId) external {\n        Market storage market = markets[_marketId];\n        require(market.resolved, \"Market not resolved yet\");\n        require(!hasClaimed[_marketId][msg.sender], \"Already claimed\");\n\n        uint256 userBet;\n        uint256 winningPool;\n        uint256 losingPool;\n\n        if (market.outcome == Outcome.Yes) {\n            userBet = yesBets[_marketId][msg.sender];\n            winningPool = market.totalYesPool;\n            losingPool = market.totalNoPool;\n        } else if (market.outcome == Outcome.No) {\n            userBet = noBets[_marketId][msg.sender];\n            winningPool = market.totalNoPool;\n            losingPool = market.totalYesPool;\n        } else {\n            revert(\"Invalid outcome\");\n        }\n\n        require(userBet > 0, \"No winning bet found\");\n        hasClaimed[_marketId][msg.sender] = true;\n\n        // Calculate reward: user's bet + proportional share of the losing pool\n        uint256 reward = userBet;\n        if (losingPool > 0 && winningPool > 0) {\n            reward += (userBet * losingPool) / winningPool;\n        }\n\n        (bool success, ) = payable(msg.sender).call{value: reward}(\"\");\n        require(success, \"Transfer failed\");\n\n        emit WinningsClaimed(_marketId, msg.sender, reward);\n    }\n}\n"
+      }
+    }
+  }
+}
